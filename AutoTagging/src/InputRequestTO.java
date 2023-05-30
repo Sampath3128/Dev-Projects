@@ -3,6 +3,7 @@ import java.util.Map;
 
 public class InputRequestTO {
 
+    private Integer altGroupID;
     private Integer entityID;
     private String groupName;
     private String policyName;
@@ -10,8 +11,16 @@ public class InputRequestTO {
     private List<InputParameterTO> selectedParameterList;
     private Integer groupContextID;
     private Integer groupID;
-    private Map<Integer, List<InputParameterValueTO>> selectedParameterValueMap;
+    private Map<Long, List<InputParameterValueTO>> selectedParameterValueMap;
     private Boolean status;
+
+    public Integer getAltGroupID() {
+        return altGroupID;
+    }
+
+    public void setAltGroupID(Integer altGroupID) {
+        this.altGroupID = altGroupID;
+    }
 
     public Integer getEntityID() {
         return entityID;
@@ -69,11 +78,11 @@ public class InputRequestTO {
         this.groupID = groupID;
     }
 
-    public Map<Integer, List<InputParameterValueTO>> getSelectedParameterValueMap() {
+    public Map<Long, List<InputParameterValueTO>> getSelectedParameterValueMap() {
         return selectedParameterValueMap;
     }
 
-    public void setSelectedParameterValueMap(Map<Integer, List<InputParameterValueTO>> selectedParameterValueMap) {
+    public void setSelectedParameterValueMap(Map<Long, List<InputParameterValueTO>> selectedParameterValueMap) {
         this.selectedParameterValueMap = selectedParameterValueMap;
     }
 

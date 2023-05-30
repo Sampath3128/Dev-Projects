@@ -1,15 +1,47 @@
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
+import org.jose4j.json.internal.json_simple.JSONObject;
+import org.jose4j.json.internal.json_simple.parser.JSONParser;
 
 public class AltGroup {
 
     // This function needs to be called on creating an Employee Group
     public void createEmployeeGroup(InputRequestTO inputRequestTO, Integer organizationID, Integer tenantID) {
-        Map<Integer, Map<Boolean, List<String>>> inclusionExclusionMap = generateInclusionExclusion(inputRequestTO, organizationID, tenantID);
+        Map<String, Map<Long, List<String>>> inclusionExclusionMap = generateInclusionExclusion(inputRequestTO, organizationID, tenantID);
         // generate the records accordingly and insert to AltGroupParameterValueAgr table
+        List<AltGroupParameterValueAggregate> entries = generateAggregateTableEntries(inclusionExclusionMap, inputRequestTO, organizationID, tenantID);
+        // insert these values into the MariaDB
+    }
+
+    private List<AltGroupParameterValueAggregate> generateAggregateTableEntries(Map<String, Map<Long, List<String>>> inclusionExclusionMap,
+                                                                                InputRequestTO inputRequestTO, Integer organizationID, Integer tenantID) {
+        List<AltGroupParameterValueAggregate> resultList = new ArrayList<>();
+        for (String type : inclusionExclusionMap.keySet()) {
+            for (Long sysGroupParameterID : inclusionExclusionMap.get(type).keySet()) {
+                AltGroupParameterValueAggregate aggregate = new AltGroupParameterValueAggregate();
+                aggregate.setAltGroupID(inputRequestTO.getAltGroupID());
+                aggregate.setOrganizationID(organizationID);
+                aggregate.setTenantID(tenantID);
+                aggregate.setIsActive(inputRequestTO.getStatus());
+                aggregate.setSysGroupParameterID(sysGroupParameterID);
+                Map<String, List<String>> valueMap = new HashMap<>();
+                valueMap.put("values", inclusionExclusionMap.get(type).get(sysGroupParameterID));
+                JSONObject jsonObject = new JSONObject(map);
+                String jsonString = jsonObject.toJSONString();
+                aggregate.setValueList(jsonString);
+                if (type.equalsIgnoreCase("Inclusion")) {
+                    aggregate.setIsInclusive(true);
+                } else {
+                    aggregate.setIsInclusive(false);
+                }
+                aggregate.setCreatedBy(1);
+                aggregate.setModifiedBy(1);
+                aggregate.setCreatedDate(new Date());
+                aggregate.setModifiedDate(new Date());
+                resultList.add(aggregate);
+            }
+        }
+        return resultList;
     }
 
     // This function needs to be called on Migration of Employee Group data for an Organization
@@ -21,9 +53,9 @@ public class AltGroup {
         }
     }
 
-    public Map<Integer, Map<Boolean, List<String>>> generateInclusionExclusion(InputRequestTO inputRequestTO, Integer organizationID, Integer tenantID) {
+    public Map<String, Map<Long, List<String>>> generateInclusionExclusion(InputRequestTO inputRequestTO, Integer organizationID, Integer tenantID) {
         List<InputParameterTO> inputParameterTOS = inputRequestTO.getSelectedParameterList();
-        Map<Integer, Map<Boolean, List<String>>> resultList = new HashMap<>();
+        Map<String, Map<Long, List<String>>> result = new HashMap<>();
 
         for (InputParameterTO inputParameterTO : inputParameterTOS) {
             List<String> inclusionList = new ArrayList<>();
@@ -42,15 +74,26 @@ public class AltGroup {
             } else {
                 List<InputParameterValueTO> inputParameterValueTOList = inputRequestTO.getSelectedParameterValueMap().get(inputParameterTO.getSysGroupParameterID());
                 for (InputParameterValueTO inputParameterValueTO : inputParameterValueTOList) {
-                    if (incExcMap.get(true)==null) {
-                        incExcMap.put(true, new ArrayList<>());
+                    if (inclusionList==null) {
+                        inclusionList = new ArrayList<>();
                     }
-                    incExcMap.get(true).add(inputParameterValueTO.getId().toString());
+                    inclusionList.add(inputParameterValueTO.getId().toString());
                 }
             }
-            resultList.put(inputParameterTO.getSysGroupParameterID(), incExcMap);
+            if (inclusionList!=null && !inclusionList.isEmpty()) {
+                if (result.get("Inclusion")==null) {
+                    result.put("Inclusion", new HashMap<>());
+                }
+                result.get("Inclusion").put(inputParameterTO.getSysGroupParameterID(), inclusionList);
+            }
+            if (exclusionList!=null && !exclusionList.isEmpty()) {
+                if (result.get("Exclusion")==null) {
+                    result.put("Exclusion", new HashMap<>());
+                }
+                result.get("Exclusion").put(inputParameterTO.getSysGroupParameterID(), exclusionList);
+            }
         }
-        return resultList;
+        return result;
     }
 
     private List<SystemHierarchyTO> fetchRootNodes(List<SystemHierarchyTO> systemHierarchyTOS) {
@@ -124,7 +167,7 @@ public class AltGroup {
             Integer organizationID = (Integer) objects[1];
             Integer tenantID = (Integer) objects[2];
             Integer entityID = (Integer) objects[3];
-            Integer sysGroupParameterID = (Integer) objects[4];
+            Long sysGroupParameterID = (Long) objects[4];
             String sysGroupParameterName = (String) objects[5];
             Boolean isTreeStructure = (Boolean) objects[6];
             Integer valueID = (Integer) objects[7];
