@@ -1,16 +1,72 @@
 import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import org.jose4j.json.internal.json_simple.JSONObject;
 import org.jose4j.json.internal.json_simple.parser.JSONParser;
 
 public class AltGroup {
 
-    // This function needs to be called on creating an Employee Group
-    public void createEmployeeGroup(InputRequestTO inputRequestTO, Integer organizationID, Integer tenantID) {
-        Map<String, Map<Long, List<String>>> inclusionExclusionMap = generateInclusionExclusion(inputRequestTO, organizationID, tenantID);
+    private AltGroupDS altGroupDS;
+
+    // This function needs to be called for creating an Employee Group for an input request
+    public void createEmployeeGroup(InputRequestTO inputRequestTO, Integer organizationID, Integer tenantID) throws Exception {
+        // Fetch all the distinct input SysGroupParameters
+        Map<Long, InputParameterTO> inputParameterTOMap = new HashMap<>();
+        for (InputParameterTO inputParameterTO : inputRequestTO.getSelectedParameterList()) {
+            if (!inputParameterTOMap.containsKey(inputParameterTO.getSysGroupParameterID())) {
+                inputParameterTOMap.put(inputParameterTO.getSysGroupParameterID(), inputParameterTO);
+            }
+        }
+
+        // For all the tree structure SysGroupParameters fetch the System Level Data
+        Map<Long, List<SystemHierarchyTO>> systemHierarchyTOMap = new HashMap<>();
+        for (Long sysGroupParameterID : systemHierarchyTOMap.keySet()) {
+            InputParameterTO inputParameterTO = inputParameterTOMap.get(sysGroupParameterID);
+            if (checkIfTreeStructure(inputParameterTO.getLabel())) {
+                List<SystemHierarchyTO> systemData = fetchSystemHierarchyTOList(inputParameterTO.getLabel(), organizationID, tenantID);
+                if (!systemHierarchyTOMap.containsKey(sysGroupParameterID)) {
+                    systemHierarchyTOMap.put(sysGroupParameterID, systemData);
+                }
+            }
+        }
+        // Generate the inclusion Mao for the input request
+        Map<String, Map<Long, List<String>>> inclusionExclusionMap = generateInclusionExclusion(inputRequestTO, organizationID, tenantID, systemHierarchyTOMap);
         // generate the records accordingly and insert to AltGroupParameterValueAgr table
         List<AltGroupParameterValueAggregate> entries = generateAggregateTableEntries(inclusionExclusionMap, inputRequestTO, organizationID, tenantID);
-        // insert these values into the MariaDB
+        // insert these values into the MariaDB via multithreading
+        ExecutorService pool = Executors.newFixedThreadPool(10);
+        List<Callable<Void>> callables = entries.stream().map(agpv -> (Callable<Void>) () -> {
+            altGroupDS.saveValue(agpv);
+            return null;
+        }).collect(Collectors.toList());
+
+        try {
+            pool.invokeAll(callables);
+        } catch (Exception e) {
+            throw new Exception(e);
+        }
+    }
+
+    public void createEmployeeGroupViaMigration(InputRequestTO inputRequestTO, Integer organizationID,
+                                                Integer tenantID, Map<Long, List<SystemHierarchyTO>> systemHierarchyTOMap) throws Exception {
+        // Generate the inclusion Mao for the input request
+        Map<String, Map<Long, List<String>>> inclusionExclusionMap = generateInclusionExclusion(inputRequestTO, organizationID, tenantID, systemHierarchyTOMap);
+        // generate the records accordingly and insert to AltGroupParameterValueAgr table
+        List<AltGroupParameterValueAggregate> entries = generateAggregateTableEntries(inclusionExclusionMap, inputRequestTO, organizationID, tenantID);
+        // insert these values into the MariaDB via multithreading
+        ExecutorService pool = Executors.newFixedThreadPool(10);
+        List<Callable<Void>> callables = entries.stream().map(agpv -> (Callable<Void>) () -> {
+            altGroupDS.saveValue(agpv);
+            return null;
+        }).collect(Collectors.toList());
+
+        try {
+            pool.invokeAll(callables);
+        } catch (Exception e) {
+            throw new Exception(e);
+        }
     }
 
     private List<AltGroupParameterValueAggregate> generateAggregateTableEntries(Map<String, Map<Long, List<String>>> inclusionExclusionMap,
@@ -45,15 +101,43 @@ public class AltGroup {
     }
 
     // This function needs to be called on Migration of Employee Group data for an Organization
-    public void startMigration(Integer organizationID, Integer tenantID) {
+    public void startMigration(Integer organizationID, Integer tenantID) throws Exception {
+        // Fetch all the group info of the input organizationID and tenantID
         List<Object[]> groupsInfo = fetchGroupsInfoByOrgID(organizationID, tenantID);
+        // Generate the inputRequestTOs for all the data fetch groupwise
         List<InputRequestTO> groupRequestTOs = createGroupInputRequestTOs(groupsInfo);
+        // Fetch distinct SysGroupParameters in all the input requests
+        Map<Long, InputParameterTO> inputParameterTOMap = new HashMap<>();
         for (InputRequestTO inputRequestTO : groupRequestTOs) {
-            createEmployeeGroup(inputRequestTO, organizationID, tenantID);
+            for (InputParameterTO inputParameterTO : inputRequestTO.getSelectedParameterList()) {
+                if (!inputParameterTOMap.containsKey(inputParameterTO.getSysGroupParameterID())) {
+                    inputParameterTOMap.put(inputParameterTO.getSysGroupParameterID(), inputParameterTO);
+                }
+            }
         }
+        // fetch System Data for all the tree structure nodes
+        Map<Long, List<SystemHierarchyTO>> systemHierarchyTOMap = new HashMap<>();
+        for (Long sysGroupParameterID : systemHierarchyTOMap.keySet()) {
+            InputParameterTO inputParameterTO = inputParameterTOMap.get(sysGroupParameterID);
+            if (checkIfTreeStructure(inputParameterTO.getLabel())) {
+                List<SystemHierarchyTO> systemData = fetchSystemHierarchyTOList(inputParameterTO.getLabel(), organizationID, tenantID);
+                if (!systemHierarchyTOMap.containsKey(sysGroupParameterID)) {
+                    systemHierarchyTOMap.put(sysGroupParameterID, systemData);
+                }
+            }
+        }
+
+        // Call createEmployeeGroup function for all the input
+        ExecutorService pool = Executors.newFixedThreadPool(10);
+        List<Callable<Void>> callables = groupRequestTOs.stream().map(inputRequestTO -> (Callable<Void>) () -> {
+            createEmployeeGroupViaMigration(inputRequestTO, organizationID, tenantID);
+            return null;
+        }).collect(Collectors.toList());
+        pool.invokeAll(callables);
     }
 
-    public Map<String, Map<Long, List<String>>> generateInclusionExclusion(InputRequestTO inputRequestTO, Integer organizationID, Integer tenantID) {
+    public Map<String, Map<Long, List<String>>> generateInclusionExclusion(InputRequestTO inputRequestTO, Integer organizationID,
+                                                                           Integer tenantID, Map<Long, List<SystemHierarchyTO>> systemHierarchyTOMap) {
         List<InputParameterTO> inputParameterTOS = inputRequestTO.getSelectedParameterList();
         Map<String, Map<Long, List<String>>> result = new HashMap<>();
 
@@ -62,7 +146,7 @@ public class AltGroup {
             List<String> exclusionList = new ArrayList<>();
             Map<Boolean, List<String>> incExcMap = new HashMap<>();
             if (inputParameterTO.getTreeStructure()) {
-                List<SystemHierarchyTO> systemHierarchyTOS = fetchSystemHierarchyTOList(inputParameterTO.getLabel(), organizationID, tenantID);
+                List<SystemHierarchyTO> systemHierarchyTOS = systemHierarchyTOMap.get(inputParameterTO.getSysGroupParameterID());
                 markSelectionInSystemHierarchyTOList(systemHierarchyTOS,
                         inputRequestTO.getSelectedParameterValueMap().get(inputParameterTO.getSysGroupParameterID()));
                 List<SystemHierarchyTO> rootNodesList = fetchRootNodes(systemHierarchyTOS);
@@ -154,9 +238,10 @@ public class AltGroup {
         return result;
     }
 
-    public List<Object[]> fetchGroupsInfoByOrgID(Integer organizationID, Integer tenantID) {
-        // fetch data from AltGroup, AltGroupParameter, SysGroupParameter, AltGroupParameterValue
-        return null;
+    public List<Object[]> fetchGroupsInfoByOrgID(Integer organizationID, Integer tenantID) throws Exception {
+        // fetch data from AltGroup, AltGroupParameter, SysGroupParameter, AltGroupParameterValueAggr
+        List<Object[]> groupsInfo = altGroupDS.fetchOrganizationGroupsData(organizationID, tenantID);
+        return groupsInfo;
     }
 
     public List<InputRequestTO> createGroupInputRequestTOs(List<Object[]> groupsData) {
@@ -169,10 +254,10 @@ public class AltGroup {
             Integer entityID = (Integer) objects[3];
             Long sysGroupParameterID = (Long) objects[4];
             String sysGroupParameterName = (String) objects[5];
-            Boolean isTreeStructure = (Boolean) objects[6];
-            Integer valueID = (Integer) objects[7];
-            Integer contextID = (Integer) objects[8];
-            Boolean isActive = (Boolean) objects[9];
+            Boolean isTreeStructure = checkIfTreeStructure(sysGroupParameterName);
+            Integer valueID = (Integer) objects[6];
+            Integer contextID = (Integer) objects[7];
+            Boolean isActive = (Boolean) objects[8];
 
             if (groupRequestToMap.get(groupID)==null) {
                 groupRequestToMap.put(groupID, new InputRequestTO());
@@ -207,6 +292,21 @@ public class AltGroup {
             groupInputRequestTOList.add(inputRequestTO);
         }
         return null;
+    }
+
+    private Boolean checkIfTreeStructure(String sysGroupParameterName) {
+        if (sysGroupParameterName.equalsIgnoreCase("OrgUnit")) {
+            return true;
+        } else if (sysGroupParameterName.equalsIgnoreCase("Worksite")) {
+            return true;
+        } else if (sysGroupParameterName.equalsIgnoreCase("BusinessUnit")) {
+            return true;
+        } else if (sysGroupParameterName.equalsIgnoreCase("Division")) {
+            return true;
+        } else if (sysGroupParameterName.equalsIgnoreCase("Department")) {
+            return true;
+        }
+        return false;
     }
 
     /*
