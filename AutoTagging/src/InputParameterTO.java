@@ -1,7 +1,7 @@
 public class InputParameterTO {
 
     private String label;
-    private Integer sysGroupParameterID;
+    private Long sysGroupParameterID;
     private Boolean isSelected;
     private Boolean isTreeStructure;
 
@@ -14,11 +14,11 @@ public class InputParameterTO {
         this.label = label;
     }
 
-    public Integer getSysGroupParameterID() {
+    public Long getSysGroupParameterID() {
         return sysGroupParameterID;
     }
 
-    public void setSysGroupParameterID(Integer sysGroupParameterID) {
+    public void setSysGroupParameterID(Long sysGroupParameterID) {
         this.sysGroupParameterID = sysGroupParameterID;
     }
 
